@@ -11,17 +11,19 @@ DB_FILE = "last_disclosure.json"
 
 def get_nps_disclosures():
     url = "https://opendart.fss.or.kr/api/list.json"
+    # corp_code를 빼고 검색해야 '제출인' 기준 필터링이 가능합니다.
     params = {
         'crtfc_key': DART_API_KEY,
         'bgn_de': (datetime.now() - timedelta(days=7)).strftime('%Y%m%d'),
-        'pblntf_ty': 'B',
-        'corp_code': '00126380',
-        'page_count': '20'
+        'pblntf_ty': 'B', # 주식등의대량보유상황보고서
+        'page_count': '100' # 최근 100개를 가져와서 필터링
     }
     try:
         response = requests.get(url, params=params)
         data = response.json()
-        return data.get('list', []) if data['status'] == '000' else []
+        if data['status'] == '000':
+            return data.get('list', [])
+        return []
     except:
         return []
 
@@ -46,32 +48,34 @@ def save_last_rcept_no(rcept_no):
 def monitor():
     disclosures = get_nps_disclosures()
     if not disclosures:
+        print("공시 목록을 가져오지 못했습니다.")
         return
 
     last_rcept_no = load_last_rcept_no()
-    new_disclosures = []
+    found_count = 0
 
-    # 오래된 공시부터 순서대로 체크
+    # 최신순이므로 역순(오래된 것부터) 처리
     for d in reversed(disclosures):
-        if "주식등의대량보유상황보고서" in d['report_nm']:
-            # 마지막으로 본 번호보다 최신인 경우만 추가
+        # 제출인(flr_nm)이 '국민연금공단'인 경우만 필터링
+        if "국민연금공단" in d['flr_nm']:
             if last_rcept_no is None or d['rcept_no'] > last_rcept_no:
-                new_disclosures.append(d)
+                msg = (
+                    f"🚨 <b>국민연금 새 공시 발생</b>\n\n"
+                    f"대상기업: {d['corp_name']}\n"
+                    f"보고서명: {d['report_nm']}\n"
+                    f"제출인: {d['flr_nm']}\n"
+                    f"접수일자: {d['rcept_dt']}\n"
+                    f"링크: https://dart.fss.or.kr/dsaf001/main.do?rcpNo={d['rcept_no']}"
+                )
+                send_telegram_message(msg)
+                last_rcept_no = d['rcept_no']
+                found_count += 1
 
-    for d in new_disclosures:
-        msg = (
-            f"🚨 <b>국민연금 새 공시 발생</b>\n\n"
-            f"기업명: {d['corp_name']}\n"
-            f"보고서: {d['report_nm']}\n"
-            f"날짜: {d['rcept_dt']}\n"
-            f"링크: https://dart.fss.or.kr/dsaf001/main.do?rcpNo={d['rcept_no']}"
-        )
-        send_telegram_message(msg)
-        last_rcept_no = d['rcept_no']
-
-    if new_disclosures:
+    if found_count > 0:
         save_last_rcept_no(last_rcept_no)
+        print(f"{found_count}개의 새로운 국민연금 공시를 전송했습니다.")
+    else:
+        print("새로운 국민연금 공시가 없습니다.")
 
 if __name__ == "__main__":
     monitor()
-    
