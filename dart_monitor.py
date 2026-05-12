@@ -6,17 +6,18 @@ from datetime import datetime, timedelta
 DART_API_KEY = os.environ.get("DART_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-DB_FILE = "last_disclosure.json"
 
 def get_nps_disclosures():
     all_list = []
     url = "https://opendart.fss.or.kr/api/list.json"
+    # 넉넉하게 14일 전부터 검색
+    bgn_de = (datetime.now() - timedelta(days=14)).strftime('%Y%m%d')
 
-    # 10페이지(총 1,000건)까지 확인하여 연휴나 공시 폭주 시기에도 대비합니다.
-    for page in range(1, 11):
+    # 15페이지(총 1,500건)까지 확인하여 800건이 넘는 공시를 모두 훑습니다.
+    for page in range(1, 16):
         params = {
             'crtfc_key': DART_API_KEY,
-            'bgn_de': (datetime.now() - timedelta(days=7)).strftime('%Y%m%d'),
+            'bgn_de': bgn_de,
             'pblntf_ty': 'B',
             'page_no': str(page),
             'page_count': '100'
@@ -36,42 +37,27 @@ def send_telegram_message(message):
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
     requests.post(url, data=payload)
 
-def load_last_rcept_no():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, 'r') as f: return json.load(f).get('rcept_no')
-        except: return None
-    return None
-
-def save_last_rcept_no(rcept_no):
-    with open(DB_FILE, 'w') as f: json.dump({'rcept_no': rcept_no}, f)
-
 def monitor():
+    print("--- 국민연금 공시 전수 조사 시작 ---")
     disclosures = get_nps_disclosures()
-    if not disclosures: return
+    print(f"가져온 전체 공시 개수: {len(disclosures)}개")
 
-    last_rcept_no = load_last_rcept_no()
-    new_disclosures = []
-
+    found_count = 0
     for d in reversed(disclosures):
         if "국민연금공단" in d['flr_nm']:
-            if last_rcept_no is None or d['rcept_no'] > last_rcept_no:
-                new_disclosures.append(d)
+            msg = (
+                f"🚨 <b>국민연금 공시 발견!</b>\n\n"
+                f"대상기업: {d['corp_name']}\n"
+                f"보고서명: {d['report_nm']}\n"
+                f"제출인: {d['flr_nm']}\n"
+                f"접수일자: {d['rcept_dt']}\n"
+                f"링크: https://dart.fss.or.kr/dsaf001/main.do?rcpNo={d['rcept_no']}"
+            )
+            send_telegram_message(msg)
+            print(f"전송 성공: {d['corp_name']}")
+            found_count += 1
 
-    for d in new_disclosures:
-        msg = (
-            f"🚨 <b>국민연금 새 공시 발생</b>\n\n"
-            f"대상기업: {d['corp_name']}\n"
-            f"보고서명: {d['report_nm']}\n"
-            f"제출인: {d['flr_nm']}\n"
-            f"접수일자: {d['rcept_dt']}\n"
-            f"링크: https://dart.fss.or.kr/dsaf001/main.do?rcpNo={d['rcept_no']}"
-        )
-        send_telegram_message(msg)
-        last_rcept_no = d['rcept_no']
-
-    if new_disclosures:
-        save_last_rcept_no(last_rcept_no)
+    print(f"총 {found_count}건 전송 완료")
 
 if __name__ == "__main__":
     monitor()
