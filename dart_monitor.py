@@ -3,18 +3,19 @@ import json
 import os
 from datetime import datetime, timedelta
 
-DART_API_KEY = os.environ.get("DART_API_KEY")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# --- 설정 (공백 제거 처리 추가) ---
+DART_API_KEY = os.environ.get("DART_API_KEY", "").strip()
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 def get_nps_disclosures():
     all_list = []
     url = "https://opendart.fss.or.kr/api/list.json"
-    # 넉넉하게 14일 전부터 검색
     bgn_de = (datetime.now() - timedelta(days=14)).strftime('%Y%m%d')
 
-    # 15페이지(총 1,500건)까지 확인하여 800건이 넘는 공시를 모두 훑습니다.
-    for page in range(1, 16):
+    print(f"--- 데이터 수집 시작 (시작일: {bgn_de}) ---")
+
+    for page in range(1, 16): # 15페이지까지 확인
         params = {
             'crtfc_key': DART_API_KEY,
             'bgn_de': bgn_de,
@@ -25,39 +26,60 @@ def get_nps_disclosures():
         try:
             response = requests.get(url, params=params)
             data = response.json()
-            if data['status'] == '000':
-                all_list.extend(data.get('list', []))
-                if len(data.get('list', [])) < 100: break
-            else: break
-        except: break
+            status = data.get('status')
+            message = data.get('message')
+
+            current_list = data.get('list', [])
+            list_count = len(current_list)
+
+            print(f"페이지 {page}: 상태={status}, 가져온 개수={list_count}")
+
+            if status == '000':
+                all_list.extend(current_list)
+                if list_count < 100:
+                    print("마지막 페이지에 도달했습니다.")
+                    break
+            else:
+                print(f"⚠️ {page}페이지에서 오류 발생: {message}")
+                break
+        except Exception as e:
+            print(f"❌ {page}페이지 요청 중 에러: {e}")
+            break
+
     return all_list
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
-    requests.post(url, data=payload)
+    r = requests.post(url, data=payload)
+    if r.status_code != 200:
+        print(f"텔레그램 전송 실패: {r.text}")
 
 def monitor():
-    print("--- 국민연금 공시 전수 조사 시작 ---")
-    disclosures = get_nps_disclosures()
-    print(f"가져온 전체 공시 개수: {len(disclosures)}개")
+    # 연결 테스트용 (가장 먼저 전송)
+    send_telegram_message("📡 국민연금 감시 시스템 연결 확인!")
 
-    found_count = 0
+    disclosures = get_nps_disclosures()
+    total_found = len(disclosures)
+    print(f"총 수집된 공시: {total_found}개")
+
+    nps_count = 0
     for d in reversed(disclosures):
-        if "국민연금공단" in d['flr_nm']:
+        # '국민연금'이라는 글자가 포함되면 무조건 발송
+        if "국민연금" in d['flr_nm']:
+            nps_count += 1
+            print(f"🎯 발견: {d['corp_name']} (제출인: {d['flr_nm']})")
             msg = (
                 f"🚨 <b>국민연금 공시 발견!</b>\n\n"
-                f"대상기업: {d['corp_name']}\n"
-                f"보고서명: {d['report_nm']}\n"
+                f"기업명: {d['corp_name']}\n"
+                f"보고서: {d['report_nm']}\n"
                 f"제출인: {d['flr_nm']}\n"
-                f"접수일자: {d['rcept_dt']}\n"
+                f"날짜: {d['rcept_dt']}\n"
                 f"링크: https://dart.fss.or.kr/dsaf001/main.do?rcpNo={d['rcept_no']}"
             )
             send_telegram_message(msg)
-            print(f"전송 성공: {d['corp_name']}")
-            found_count += 1
 
-    print(f"총 {found_count}건 전송 완료")
+    print(f"--- 작업 완료: 국민연금 공시 {nps_count}건 전송 ---")
 
 if __name__ == "__main__":
     monitor()
