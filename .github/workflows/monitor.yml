@@ -1,40 +1,38 @@
- ✓  WriteFile  monitor.yml → Accepted (+38, -0)
+name: NPS Disclosure Monitor
 
-       1 name: NPS Disclosure Monitor
-       2
-       3 on:
-       4   schedule:
-       5     - cron: '*/30 * * * *' # 30분마다 실행
-       6   workflow_dispatch: # 수동 실행 버튼 생성
-       7
-       8 jobs:
-       9   build:
-      10     runs-on: ubuntu-latest
-      11     steps:
-      12       - name: Checkout code
-      13         uses: actions/checkout@v3
-      14
-      15       - name: Set up Python
-      16         uses: actions/setup-python@v4
-      17         with:
-      18           python-version: '3.9'
-      19
-      20       - name: Install dependencies
-      21         run: |
-      22           python -m pip install --upgrade pip
-      23           pip install -r requirements.txt
-      24
-      25       - name: Run monitor script
-      26         env:
-      27           DART_API_KEY: ${{ secrets.DART_API_KEY }}
-      28           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      29           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      30         run: python dart_monitor.py
-      31
-      32       - name: Commit changes
-      33         run: |
-      34           git config --local user.email "action@github.com"
-      35           git config --local user.name "GitHub Action"
-      36           git add last_disclosure.json
-      37           git commit -m "Update last disclosure ID" || echo "No changes to commit"
-      38           git push
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run monitor script
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python dart_monitor.py
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add last_disclosure.json
+          git commit -m "Update last disclosure ID" || echo "No changes to commit"
+          git push
